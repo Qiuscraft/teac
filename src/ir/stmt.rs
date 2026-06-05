@@ -118,10 +118,10 @@ pub struct OperandRef<'a> {
 }
 
 impl Stmt {
-    pub fn as_call(link_name: String, res: Option<Operand>, args: Vec<Operand>) -> Self {
+    pub fn as_call(func_name: String, res: Option<Operand>, args: Vec<Operand>) -> Self {
         Self {
             inner: StmtInner::Call(CallStmt {
-                link_name,
+                func_name,
                 res,
                 args,
             }),
@@ -234,10 +234,7 @@ impl Display for Stmt {
 
 #[derive(Clone)]
 pub struct CallStmt {
-    /// The linker-visible symbol of the callee, resolved once at IR
-    /// generation time via [`crate::ir::compute_link_name`] and stored
-    /// here so that every backend can consume it verbatim.
-    pub link_name: String,
+    pub func_name: String,
     pub res: Option<Operand>,
     pub args: Vec<Operand>,
 }
@@ -325,7 +322,7 @@ impl Display for CallStmt {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let func_name = &self.link_name;
+        let func_name = &self.func_name;
         if let Some(res) = &self.res {
             write!(f, "{res} = call {} @{func_name}({args})", res.dtype())
         } else {
@@ -522,7 +519,7 @@ impl Stmt {
             }
             StmtInner::Call(s) => {
                 let args = s.args.iter().map(&f).collect();
-                Stmt::as_call(s.link_name.clone(), s.res.clone(), args)
+                Stmt::as_call(s.func_name.clone(), s.res.clone(), args)
             }
             StmtInner::Gep(s) => Stmt::as_gep(s.new_ptr.clone(), f(&s.base_ptr), f(&s.index)),
             StmtInner::Return(s) => Stmt::as_return(s.val.as_ref().map(&f)),

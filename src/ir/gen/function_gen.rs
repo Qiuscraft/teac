@@ -27,9 +27,7 @@ fn array_index_operand(index: usize) -> Operand {
     )
 }
 
-// -----------------------------------------------------------------------
-// Function entry-point generation
-// -----------------------------------------------------------------------
+// ── Function entry-point generation ──────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
     /// Generates IR for a complete function definition.
@@ -56,10 +54,7 @@ impl FunctionGenerator<'_> {
 
         let arguments = function_type.arguments.clone();
         let return_dtype = function_type.return_dtype.clone();
-        // The entry label is the function's link name so that the IR's
-        // entry-block label matches the `@symbol` emitted by the printer.
-        let entry_label = self.resolve_link_name(identifier);
-        self.emit_label(BlockLabel::Function(entry_label));
+        self.emit_label(BlockLabel::Function(identifier.clone()));
 
         // Spill every argument to the stack (alloca + store) so they are addressable.
         for (id, dtype) in &arguments {
@@ -106,9 +101,7 @@ impl FunctionGenerator<'_> {
     }
 }
 
-// -----------------------------------------------------------------------
-// Statement handlers
-// -----------------------------------------------------------------------
+// ── Statement handlers ────────────────────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
     /// Dispatches a single code-block statement to the appropriate handler.
@@ -131,6 +124,7 @@ impl FunctionGenerator<'_> {
             ast::CodeBlockStmtInner::Call(s) => self.handle_call_stmt(s),
             ast::CodeBlockStmtInner::If(s) => self.handle_if_stmt(s, con_label, bre_label),
             ast::CodeBlockStmtInner::While(s) => self.handle_while_stmt(s),
+            ast::CodeBlockStmtInner::For(s) => self.handle_for_stmt(s),
             ast::CodeBlockStmtInner::Return(s) => self.handle_return_stmt(s),
             ast::CodeBlockStmtInner::Continue(_) => self.handle_continue_stmt(con_label),
             ast::CodeBlockStmtInner::Break(_) => self.handle_break_stmt(bre_label),
@@ -330,8 +324,7 @@ impl FunctionGenerator<'_> {
                          which FunctionType::try_from should have rejected"
                     ),
                 };
-                let link_name = self.resolve_link_name(&function_name);
-                self.emit_call(link_name, retval, args);
+                self.emit_call(function_name, retval, args);
                 Ok(())
             }
         }
@@ -425,6 +418,14 @@ impl FunctionGenerator<'_> {
     ///
     /// Emits a void `return` when no value is present, or evaluates the return
     /// expression and emits a value-carrying `return` otherwise.
+    pub fn handle_for_stmt(&mut self, stmt: &ast::ForStmt) -> Result<(), Error> {
+        // For-loop is parsed but IR generation is not required for Lab 1
+        // This would be implemented in a future lab
+        Err(Error::UnsupportedFeature {
+            feature: "for-loop IR generation".to_string(),
+        })
+    }
+
     pub fn handle_return_stmt(&mut self, stmt: &ast::ReturnStmt) -> Result<(), Error> {
         match &stmt.val {
             None => {
@@ -457,9 +458,7 @@ impl FunctionGenerator<'_> {
     }
 }
 
-// -----------------------------------------------------------------------
-// Expression and value handlers
-// -----------------------------------------------------------------------
+// ── Expression and value handlers ─────────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
     /// Lowers a comparison expression into a conditional branch.
@@ -495,6 +494,12 @@ impl FunctionGenerator<'_> {
     fn handle_expr_unit(&mut self, unit: &ast::ExprUnit) -> Result<Operand, Error> {
         let operand = match &unit.inner {
             ast::ExprUnitInner::Num(num) => Ok(Operand::from(*num)),
+            ast::ExprUnitInner::Float(_) => {
+                // Float literals are parsed but IR generation is not required for Lab 1
+                Err(Error::UnsupportedFeature {
+                    feature: "float literal IR generation".to_string(),
+                })
+            }
             ast::ExprUnitInner::Id(id) => {
                 let op = self.lookup_variable(id)?;
                 // Arrays cannot be used directly as scalar values.
@@ -540,8 +545,7 @@ impl FunctionGenerator<'_> {
                     let rval = self.handle_right_val(arg)?;
                     args.push(rval);
                 }
-                let link_name = self.resolve_link_name(&name);
-                self.emit_call(link_name, Some(res.clone()), args);
+                self.emit_call(name, Some(res.clone()), args);
 
                 Ok(res)
             }
@@ -549,6 +553,12 @@ impl FunctionGenerator<'_> {
             ast::ExprUnitInner::MemberExpr(expr) => self.handle_member_expr(expr),
             ast::ExprUnitInner::Reference(id) => {
                 return self.handle_reference_expr(id);
+            }
+            ast::ExprUnitInner::Cast(_) => {
+                // Type casts are parsed but IR generation is not required for Lab 1
+                Err(Error::UnsupportedFeature {
+                    feature: "type cast IR generation".to_string(),
+                })
             }
         }?;
 
@@ -734,9 +744,7 @@ impl FunctionGenerator<'_> {
     }
 }
 
-// -----------------------------------------------------------------------
-// Boolean expression handlers
-// -----------------------------------------------------------------------
+// ── Boolean expression handlers ───────────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
     /// Lowers a boolean expression to a materialized `i32` value (0 or 1).

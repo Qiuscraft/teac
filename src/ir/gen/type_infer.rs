@@ -165,6 +165,9 @@ impl TypeInference<'_> {
             ast::CodeBlockStmtInner::While(s) => self.process_while(s),
             ast::CodeBlockStmtInner::Call(s) => self.check_call_args(&s.fn_call),
             ast::CodeBlockStmtInner::Return(s) => self.process_return(s),
+            ast::CodeBlockStmtInner::For(_) => Err(Error::UnsupportedFeature {
+                feature: "for-loop type inference".to_string(),
+            }),
             ast::CodeBlockStmtInner::Continue(_)
             | ast::CodeBlockStmtInner::Break(_)
             | ast::CodeBlockStmtInner::Null(_) => Ok(()),
@@ -430,12 +433,18 @@ impl TypeInference<'_> {
     fn type_of_expr_unit(&self, unit: &ast::ExprUnit) -> Result<Dtype, Error> {
         match &unit.inner {
             ast::ExprUnitInner::Num(_) => Ok(Dtype::I32),
+            ast::ExprUnitInner::Float(_) => Ok(Dtype::F32),
             ast::ExprUnitInner::Id(id) => self.resolve_variable(id),
             ast::ExprUnitInner::ArithExpr(expr) => self.type_of_arith_expr(expr),
             ast::ExprUnitInner::FnCall(call) => self.type_of_fn_call(call),
             ast::ExprUnitInner::ArrayExpr(expr) => self.type_of_array_expr(expr),
             ast::ExprUnitInner::MemberExpr(expr) => self.type_of_member_expr(expr),
             ast::ExprUnitInner::Reference(id) => self.type_of_reference(id),
+            ast::ExprUnitInner::Cast(cast) => {
+                // Type-check inner expression for side effects (nested calls).
+                self.type_of_expr_unit(&cast.expr)?;
+                Ok(Dtype::from(&cast.target_type))
+            }
         }
     }
 

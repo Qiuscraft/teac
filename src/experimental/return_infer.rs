@@ -159,19 +159,19 @@ impl UnionFind {
     /// See `docs/asmt-2.md` §3.2 (核心不变式) and §3.3 (工作示例).
     #[allow(unused_variables)]
     fn bind(&mut self, x: TypeId, dtype: Dtype, symbol: &str) -> Result<(), Error> {
-        // TODO(asmt-2 §3.3): Implement `bind`.
-        //
-        // Steps:
-        //   1. Find the root of x (path compression happens inside `find`).
-        //   2. Inspect `self.concrete[root]`:
-        //        - `None`            → store `Some(dtype)`.
-        //        - `Some(existing)`  → if `*existing == dtype`, do nothing;
-        //                              otherwise return `Error::TypeMismatch`
-        //                              (expected: existing, actual: dtype).
-        //
-        // The core invariant you are maintaining: **every equivalence class
-        // has at most one concrete type**.
-        todo!("asmt-2 §3.3: UnionFind::bind")
+        let root = self.find(x);
+        match &self.concrete[root] {
+            None => {
+                self.concrete[root] = Some(dtype);
+                Ok(())
+            }
+            Some(existing) if *existing == dtype => Ok(()),
+            Some(existing) => Err(Error::TypeMismatch {
+                symbol: symbol.to_string(),
+                expected: existing.clone(),
+                actual: dtype,
+            }),
+        }
     }
 
     /// Merge the equivalence classes containing `a` and `b` (union by rank).
@@ -192,18 +192,39 @@ impl UnionFind {
     /// conflict at the end demonstrates the last row in miniature.
     #[allow(unused_variables)]
     fn union(&mut self, a: TypeId, b: TypeId, symbol: &str) -> Result<(), Error> {
-        // TODO(asmt-2 §3.3): Implement `union`.
-        //
-        // Steps:
-        //   1. Find the two roots `ra`, `rb`. If they coincide, return Ok.
-        //   2. Combine `self.concrete[ra]` and `self.concrete[rb]` per the
-        //      table above; on conflict, return `Error::TypeMismatch`.
-        //   3. Hang the lower-rank tree under the higher-rank one
-        //      (use `self.rank`). When ranks tie, pick either root and
-        //      bump its rank by 1.
-        //   4. Write the merged concrete binding into the chosen root's
-        //      slot; the other slot is unused from now on.
-        todo!("asmt-2 §3.3: UnionFind::union")
+        let mut ra = self.find(a);
+        let mut rb = self.find(b);
+        if ra == rb {
+            return Ok(());
+        }
+
+        let ca = self.concrete[ra].clone();
+        let cb = self.concrete[rb].clone();
+        let merged = match (ca, cb) {
+            (None, None) => None,
+            (Some(t), None) | (None, Some(t)) => Some(t),
+            (Some(ta), Some(tb)) if ta == tb => Some(ta),
+            (Some(ta), Some(tb)) => {
+                return Err(Error::TypeMismatch {
+                    symbol: symbol.to_string(),
+                    expected: ta,
+                    actual: tb,
+                });
+            }
+        };
+
+        // Union by rank: ensure `ra` is the new root.
+        if self.rank[ra] < self.rank[rb] {
+            std::mem::swap(&mut ra, &mut rb);
+        }
+        self.parent[rb] = ra;
+        if self.rank[ra] == self.rank[rb] {
+            self.rank[ra] += 1;
+        }
+
+        self.concrete[ra] = merged;
+        self.concrete[rb] = None;
+        Ok(())
     }
 
     /// Return the concrete type currently bound to `x`'s equivalence class,
@@ -211,12 +232,8 @@ impl UnionFind {
     /// yet.  The resolve phase of Pass 2.5 calls this exactly once per
     /// pending function.
     fn resolve(&mut self, x: TypeId) -> Option<Dtype> {
-        // TODO(asmt-2 §3.3): Implement `resolve`.
-        //
-        // Return `self.concrete[find(x)].clone()`.  Make sure to go through
-        // `find` so that path compression is triggered and the answer
-        // reflects all unions performed so far.
-        todo!("asmt-2 §3.3: UnionFind::resolve")
+        let root = self.find(x);
+        self.concrete[root].clone()
     }
 }
 
@@ -237,13 +254,23 @@ impl UnionFind {
 /// (usually a variable name, a function name, or `self.fn_name`).
 #[allow(unused_variables)]
 fn unify(uf: &mut UnionFind, a: &Ty, b: &Ty, symbol: &str) -> Result<(), Error> {
-    // TODO(asmt-2 §3.4): Implement the three-way match on `(a, b)`.
-    //
-    // For the Concrete/Concrete arm, format the error the same way the
-    // UnionFind operations do (`Error::TypeMismatch { symbol, expected,
-    // actual }`) so the diagnostic stays consistent regardless of which
-    // branch fails.
-    todo!("asmt-2 §3.4: unify — three cases")
+    match (a, b) {
+        (Ty::Concrete(x), Ty::Concrete(y)) => {
+            if x == y {
+                Ok(())
+            } else {
+                Err(Error::TypeMismatch {
+                    symbol: symbol.to_string(),
+                    expected: x.clone(),
+                    actual: y.clone(),
+                })
+            }
+        }
+        (Ty::Var(v), Ty::Concrete(c)) | (Ty::Concrete(c), Ty::Var(v)) => {
+            uf.bind(*v, c.clone(), symbol)
+        }
+        (Ty::Var(x), Ty::Var(y)) => uf.union(*x, *y, symbol),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,34 +328,40 @@ pub(crate) fn resolve_return_types(
         return Ok(());
     }
 
-    // TODO(asmt-2 §4.3): Phase 2 — Collect.
-    //
-    //   Walk every FnDef body (both pending *and* non-pending — a
-    //   non-pending body may still call pending callees, and those
-    //   call sites contribute constraints we need).  Delegate each
-    //   body to `collect_constraints`, threading the same `uf` and
-    //   `pending_returns` through every call so constraints from one
-    //   body can pin the return type of another.
-    //
-    // TODO(asmt-2 §4.3): Phase 3 — Resolve.
-    //
-    //   For each `(name, α_f)` in `pending_returns`:
-    //     1. `uf.resolve(α_f)` → `Option<Dtype>`.
-    //        - `None` means no constraint ever pinned this class.
-    //          Fall back to `Dtype::Void`, matching the pre-asmt-2
-    //          semantics for a body with no `return`.
-    //     2. Reject anything other than `Void` / `I32` with
-    //        `Error::UnsupportedReturnType` (the aarch64 backend does
-    //        not lower other types).
-    //     3. Overwrite `registry.function_types[name].return_dtype`
-    //        with the resolved type.  Use `Error::FunctionNotDefined`
-    //        if the name somehow isn't in the registry (shouldn't
-    //        happen after Pass 2).
-    //
-    //   Conflicts (e.g. `type_infer_5`: both `return;` and `return t;`
-    //   in one body) surface inside `unify` during Phase 2; this
-    //   phase does not need any extra conflict checks.
-    todo!("asmt-2 §4.3: collect + resolve")
+    // -----------------------------------------------------------------------
+    // Phase 2 — Collect.
+    // -----------------------------------------------------------------------
+    {
+        let registry_ro: &Registry = &*registry;
+        for elem in elements {
+            if let ast::ProgramElementInner::FnDef(fn_def) = &elem.inner {
+                collect_constraints(registry_ro, globals, &pending_returns, &mut uf, fn_def)?;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3 — Resolve.
+    // -----------------------------------------------------------------------
+    for (name, alpha) in pending_returns.iter() {
+        let dtype = uf.resolve(*alpha).unwrap_or(Dtype::Void);
+        if !matches!(dtype, Dtype::Void | Dtype::I32) {
+            return Err(Error::UnsupportedReturnType {
+                symbol: name.clone(),
+                dtype,
+            });
+        }
+
+        let ft = registry
+            .function_types
+            .get_mut(name)
+            .ok_or_else(|| Error::FunctionNotDefined {
+                symbol: name.clone(),
+            })?;
+        ft.return_dtype = dtype;
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +462,9 @@ impl Collector<'_> {
                 Ok(())
             }
             ast::CodeBlockStmtInner::Return(s) => self.process_return(s),
+            ast::CodeBlockStmtInner::For(_) => Err(Error::UnsupportedFeature {
+                feature: "for-loop return inference".to_string(),
+            }),
             ast::CodeBlockStmtInner::Continue(_)
             | ast::CodeBlockStmtInner::Break(_)
             | ast::CodeBlockStmtInner::Null(_) => Ok(()),
@@ -493,13 +529,26 @@ impl Collector<'_> {
     ///   the env.  Arrays never hold a type variable themselves.
     #[allow(unused_variables)]
     fn process_var_def(&mut self, def: &ast::VarDef) -> Result<(), Error> {
-        // TODO(asmt-2 §3.4 + §4.3): Implement variable definition.
-        //
-        // See the docstring above for the step-by-step recipe.  The key
-        // educational point is: a declared type on the LHS becomes a
-        // `unify(lhs, rhs)` constraint rather than a direct equality
-        // check, which is the only change from `type_infer.rs`'s R2 rule.
-        todo!("asmt-2: process_var_def")
+        match &def.inner {
+            ast::VarDefInner::Scalar(scalar) => {
+                let rhs = self.type_of_right_val(&scalar.val)?;
+
+                if let Some(ts) = &def.type_specifier {
+                    let lhs = Ty::concrete(compose_var_def_dtype(Dtype::from(ts), &def.inner));
+                    unify(self.uf, &lhs, &rhs, &def.identifier)?;
+                    self.env.insert(def.identifier.clone(), lhs);
+                } else {
+                    self.env.insert(def.identifier.clone(), rhs);
+                }
+            }
+            ast::VarDefInner::Array(arr) => {
+                let base = def.type_specifier.as_ref().map_or(Dtype::I32, Dtype::from);
+                let ty = Ty::concrete(compose_var_def_dtype(base, &def.inner));
+                self.check_array_initializer(&arr.initializer)?;
+                self.env.insert(def.identifier.clone(), ty);
+            }
+        }
+        Ok(())
     }
 
     fn check_array_initializer(&mut self, init: &ast::ArrayInitializer) -> Result<(), Error> {
@@ -608,8 +657,19 @@ impl Collector<'_> {
         env_a: &HashMap<String, Ty>,
         env_b: &HashMap<String, Ty>,
     ) -> Result<(), Error> {
-        // TODO(asmt-2 §3.4): Implement if/else merge via unify.
-        todo!("asmt-2: merge_branches")
+        let keys: Vec<String> = self.env.keys().cloned().collect();
+        for name in keys {
+            let base = self
+                .env
+                .get(&name)
+                .cloned()
+                .expect("key collected from self.env must exist");
+            let a_ty = env_a.get(&name).cloned().unwrap_or_else(|| base.clone());
+            let b_ty = env_b.get(&name).cloned().unwrap_or_else(|| base.clone());
+            unify(self.uf, &a_ty, &b_ty, &name)?;
+            self.env.insert(name, a_ty);
+        }
+        Ok(())
     }
 
     /// Unify a while-body environment back into `self.env`.
@@ -623,8 +683,17 @@ impl Collector<'_> {
     /// Mirrors `type_infer.rs::merge_env_single`.
     #[allow(unused_variables)]
     fn merge_with_body(&mut self, branch_env: &HashMap<String, Ty>) -> Result<(), Error> {
-        // TODO(asmt-2 §3.4): Implement while-body merge via unify.
-        todo!("asmt-2: merge_with_body")
+        let keys: Vec<String> = self.env.keys().cloned().collect();
+        for name in keys {
+            let base = self
+                .env
+                .get(&name)
+                .cloned()
+                .expect("key collected from self.env must exist");
+            let body = branch_env.get(&name).cloned().unwrap_or_else(|| base.clone());
+            unify(self.uf, &base, &body, &name)?;
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -649,8 +718,15 @@ impl Collector<'_> {
     ///   here.
     #[allow(unused_variables)]
     fn process_return(&mut self, stmt: &ast::ReturnStmt) -> Result<(), Error> {
-        // TODO(asmt-2 §4.3): Feed the return expression into α_f.
-        todo!("asmt-2: process_return")
+        let actual = match &stmt.val {
+            Some(v) => self.type_of_right_val(v)?,
+            None => Ty::concrete(Dtype::Void),
+        };
+
+        if let Some(alpha) = self.return_var {
+            unify(self.uf, &Ty::Var(alpha), &actual, self.fn_name)?;
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -684,12 +760,17 @@ impl Collector<'_> {
     fn type_of_expr_unit(&mut self, unit: &ast::ExprUnit) -> Result<Ty, Error> {
         match &unit.inner {
             ast::ExprUnitInner::Num(_) => Ok(Ty::concrete(Dtype::I32)),
+            ast::ExprUnitInner::Float(_) => Ok(Ty::concrete(Dtype::F32)),
             ast::ExprUnitInner::Id(id) => self.resolve_variable(id),
             ast::ExprUnitInner::ArithExpr(expr) => self.type_of_arith_expr(expr),
             ast::ExprUnitInner::FnCall(call) => self.type_of_fn_call(call),
             ast::ExprUnitInner::ArrayExpr(expr) => self.type_of_array_expr(expr),
             ast::ExprUnitInner::MemberExpr(expr) => self.type_of_member_expr(expr),
             ast::ExprUnitInner::Reference(id) => self.type_of_reference(id),
+            ast::ExprUnitInner::Cast(cast) => {
+                self.type_of_expr_unit(&cast.expr)?;
+                Ok(Ty::concrete(Dtype::from(&cast.target_type)))
+            }
         }
     }
 
@@ -735,9 +816,21 @@ impl Collector<'_> {
     ///   callees are `Error::FunctionNotDefined`.
     #[allow(unused_variables)]
     fn type_of_fn_call(&mut self, call: &ast::FnCall) -> Result<Ty, Error> {
-        // TODO(asmt-2 §4.3): Return Ty::Var for pending callees,
-        // Ty::Concrete for registered ones.
-        todo!("asmt-2: type_of_fn_call")
+        for arg in &call.vals {
+            self.type_of_right_val(arg)?;
+        }
+
+        let name = call.qualified_name();
+        if let Some(alpha) = self.pending.get(&name) {
+            return Ok(Ty::Var(*alpha));
+        }
+
+        let fty = self
+            .registry
+            .function_types
+            .get(&name)
+            .ok_or_else(|| Error::FunctionNotDefined { symbol: name.clone() })?;
+        Ok(Ty::concrete(fty.return_dtype.clone()))
     }
 
     fn type_of_array_expr(&mut self, expr: &ast::ArrayExpr) -> Result<Ty, Error> {

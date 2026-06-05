@@ -197,6 +197,12 @@ impl<'a> ParseContext<'a> {
                         inner: ast::TypeSpecifierInner::BuiltIn(ast::BuiltIn::Int),
                     }));
                 }
+                Rule::kw_f32 => {
+                    return Ok(Some(ast::TypeSpecifier {
+                        pos,
+                        inner: ast::TypeSpecifierInner::BuiltIn(ast::BuiltIn::F32),
+                    }));
+                }
                 Rule::identifier => {
                     // User-defined composite (struct) type referenced by name.
                     return Ok(Some(ast::TypeSpecifier {

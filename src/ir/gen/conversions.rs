@@ -66,7 +66,8 @@ impl From<ast::TypeSpecifier> for Dtype {
 impl From<&ast::TypeSpecifier> for Dtype {
     fn from(a: &ast::TypeSpecifier) -> Self {
         match &a.inner {
-            ast::TypeSpecifierInner::BuiltIn(_) => Self::I32,
+            ast::TypeSpecifierInner::BuiltIn(ast::BuiltIn::Int) => Self::I32,
+            ast::TypeSpecifierInner::BuiltIn(ast::BuiltIn::F32) => Self::F32,
             ast::TypeSpecifierInner::Composite(name) => Self::Struct {
                 type_name: name.clone(),
             },

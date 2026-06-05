@@ -16,12 +16,6 @@ use super::types::StructType;
 pub struct Registry {
     pub struct_types: IndexMap<String, StructType>,
     pub function_types: IndexMap<String, FunctionType>,
-    /// Map from a function's source-level (possibly qualified) name to
-    /// the symbol it exports to the linker.  Populated at registration
-    /// time by [`crate::ir::compute_link_name`]; consulted at every
-    /// call site so that the IR's call instructions carry the linker
-    /// name directly.
-    pub link_names: IndexMap<String, String>,
 }
 
 /// A compiled module: the top-level container for globals and functions.
@@ -52,7 +46,6 @@ impl<'a> IrGenerator<'a> {
         let registry = Registry {
             struct_types: IndexMap::new(),
             function_types: IndexMap::new(),
-            link_names: IndexMap::new(),
         };
         Self {
             input,

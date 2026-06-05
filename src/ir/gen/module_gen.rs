@@ -8,8 +8,9 @@
 //! declarations, function definitions, and struct definitions).
 
 use crate::ast;
-use crate::ir::compute_link_name;
-use crate::ir::function::{BasicBlock, BlockLabel, Function, FunctionBody, FunctionGenerator};
+use crate::ir::function::{
+    BasicBlock, BlockLabel, Function, FunctionBody, FunctionGenerator,
+};
 use crate::ir::gen::type_infer;
 use crate::ir::module::IrGenerator;
 use crate::ir::printer::IrPrinter;
@@ -55,13 +56,7 @@ impl Generator for IrGenerator<'_> {
                 ast::ProgramElementInner::VarDeclStmt(stmt) => {
                     self.handle_global_var_decl(stmt)?;
                 }
-                ast::ProgramElementInner::FnDeclStmt(fn_decl) => {
-                    // A bare `fn foo(...);` that appears at the top level of a
-                    // regular source file declares an external symbol: the
-                    // body is provided by some other translation unit and the
-                    // programmer is explicitly opting into the C linkage name.
-                    self.handle_fn_decl(fn_decl, true)?;
-                }
+                ast::ProgramElementInner::FnDeclStmt(fn_decl) => self.handle_fn_decl(fn_decl)?,
                 ast::ProgramElementInner::FnDef(fn_def) => self.handle_fn_def(fn_def)?,
                 ast::ProgramElementInner::StructDef(struct_def) => {
                     self.handle_struct_def(struct_def)?;
@@ -90,8 +85,11 @@ impl Generator for IrGenerator<'_> {
                 // from the registry plus the module's global variable list —
                 // so every identifier inside the function body resolves
                 // consistently in both passes.
-                let resolved_types =
-                    type_infer::infer_function(&self.registry, &self.module.global_list, fn_def)?;
+                let resolved_types = type_infer::infer_function(
+                    &self.registry,
+                    &self.module.global_list,
+                    fn_def,
+                )?;
 
                 // Use a scoped FunctionGenerator so its temporary state is
                 // dropped before we mutably borrow `self.module` below.
@@ -190,7 +188,7 @@ impl IrGenerator<'_> {
                     let mut prefixed_decl = fn_decl_stmt.fn_decl.as_ref().clone();
                     prefixed_decl.identifier =
                         format!("{module_name}::{}", prefixed_decl.identifier);
-                    self.handle_fn_decl(&prefixed_decl, true)?;
+                    self.handle_fn_decl(&prefixed_decl)?;
                 }
             }
         }
@@ -386,13 +384,9 @@ impl IrGenerator<'_> {
         if self.module.global_list.contains_key(identifier.as_str()) {
             return Err(Error::VariableRedefinition { symbol: identifier });
         }
-        self.module.global_list.insert(
-            Rc::from(identifier),
-            GlobalDef {
-                dtype,
-                initializers,
-            },
-        );
+        self.module
+            .global_list
+            .insert(Rc::from(identifier), GlobalDef { dtype, initializers });
         Ok(())
     }
 
@@ -403,65 +397,30 @@ impl IrGenerator<'_> {
     ///    rejected outright (`Error::ArrayParameterNotAllowed`).
     /// 2. Build a [`FunctionType`] from the parameter list and the optional
     ///    return type (defaults to `void` if absent).
-    /// 3. Check for an existing source-level registration. If a type with
-    ///    the same identifier already exists and *differs* from the new one,
-    ///    a [`Error::ConflictedFunction`] error is returned. Identical
+    /// 3. Insert the function type into the registry.  If a type with the
+    ///    same identifier already exists and *differs* from the new one, a
+    ///    [`Error::ConflictedFunction`] error is returned.  Identical
     ///    re-declarations are silently accepted.
-    /// 4. Resolve the linker-visible symbol via [`compute_link_name`] and
-    ///    reject collisions with previously registered source-level functions.
-    ///    For example, a local `putint` may not coexist with `std::putint`,
-    ///    because both lower to the same C symbol.
-    /// 5. Insert the function type into the registry. External declarations
-    ///    (from `.teah` headers) map to their bare
-    ///    trailing segment, matching the C runtime, while in-module
-    ///    functions go through teac's Itanium-inspired encoding when
-    ///    their source-level name is namespace-qualified.  The result
-    ///    is recorded both in the registry's `link_names` table (for
-    ///    call-site lookup) and on the [`Function`] skeleton (for
-    ///    emission).
-    /// 6. Insert a skeleton [`Function`] (body-less) into the module's
+    /// 4. Insert a skeleton [`Function`] (body-less) into the module's
     ///    function list so that the printer can emit an external declaration.
-    fn handle_fn_decl(&mut self, decl: &ast::FnDecl, is_external: bool) -> Result<(), Error> {
+    fn handle_fn_decl(&mut self, decl: &ast::FnDecl) -> Result<(), Error> {
         let identifier = decl.identifier.clone();
         let function_type = FunctionType::try_from(decl)?;
 
-        if let Some(prior) = self.registry.function_types.get(&identifier) {
-            if *prior != function_type {
+        if let Some(prior) = self
+            .registry
+            .function_types
+            .insert(identifier.clone(), function_type.clone())
+        {
+            if prior != function_type {
                 return Err(Error::ConflictedFunction { symbol: identifier });
             }
-            // Signature matched a prior registration; keep the first-written
-            // link name and skeleton intact so that a later declaration (e.g.
-            // a forward decl that follows the definition) cannot silently
-            // re-mangle the symbol.
-            return Ok(());
         }
-
-        let link_name = compute_link_name(&identifier, is_external);
-        if let Some((existing, _)) = self
-            .registry
-            .link_names
-            .iter()
-            .find(|(_, existing_link_name)| *existing_link_name == &link_name)
-        {
-            return Err(Error::ConflictedLinkName {
-                symbol: identifier,
-                existing: existing.clone(),
-                link_name,
-            });
-        }
-
-        self.registry
-            .function_types
-            .insert(identifier.clone(), function_type);
-        self.registry
-            .link_names
-            .insert(identifier.clone(), link_name.clone());
 
         self.module.function_list.insert(
             identifier.clone(),
             Function {
                 identifier,
-                link_name,
                 body: None,
             },
         );
@@ -483,7 +442,7 @@ impl IrGenerator<'_> {
         let identifier = stmt.fn_decl.identifier.clone();
 
         match self.registry.function_types.get(&identifier) {
-            None => self.handle_fn_decl(&stmt.fn_decl, false)?,
+            None => self.handle_fn_decl(&stmt.fn_decl)?,
             Some(prior) => {
                 let def_type = FunctionType::try_from(stmt.fn_decl.as_ref())?;
                 if *prior != def_type {

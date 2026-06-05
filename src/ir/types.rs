@@ -6,6 +6,7 @@ pub enum Dtype {
     Void,
     I1,
     I32,
+    F32,
     Struct {
         type_name: String,
     },
@@ -47,6 +48,7 @@ impl Display for Dtype {
         match self {
             Dtype::I1 => write!(f, "i1"),
             Dtype::I32 => write!(f, "i32"),
+            Dtype::F32 => write!(f, "f32"),
             Dtype::Void => write!(f, "void"),
             Dtype::Struct { type_name } => write!(f, "%{type_name}"),
             Dtype::Pointer { .. } => write!(f, "ptr"),

@@ -127,3 +127,12 @@ pub(crate) fn parse_num(pair: Pair) -> ParseResult<i32> {
         source,
     })
 }
+
+pub(crate) fn parse_float(pair: Pair) -> ParseResult<f64> {
+    let literal = pair.as_str().to_string();
+    let (line, column) = pair.as_span().start_pos().line_col();
+
+    literal.parse().map_err(|source| Error::Syntax(format!(
+        "invalid float literal `{literal}` at line {line}, column {column}"
+    )))
+}

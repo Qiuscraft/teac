@@ -53,6 +53,11 @@ impl<'a> ParseContext<'a> {
                         inner: ast::CodeBlockStmtInner::While(self.parse_while_stmt(inner)?),
                     }));
                 }
+                Rule::for_stmt => {
+                    return Ok(Box::new(ast::CodeBlockStmt {
+                        inner: ast::CodeBlockStmtInner::For(self.parse_for_stmt(inner)?),
+                    }));
+                }
                 Rule::return_stmt => {
                     return Ok(Box::new(ast::CodeBlockStmt {
                         inner: ast::CodeBlockStmtInner::Return(self.parse_return_stmt(inner)?),
@@ -247,6 +252,84 @@ impl<'a> ParseContext<'a> {
         Ok(Box::new(ast::WhileStmt {
             bool_unit: bool_unit
                 .ok_or_else(|| grammar_error("cond.bool_unit", &pair_for_error))?,
+            stmts,
+        }))
+    }
+
+    fn parse_range_bound(&self, pair: Pair) -> ParseResult<Box<ast::ExprUnit>> {
+        let pair_for_error = pair.clone();
+        let pos = get_pos(&pair);
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::arith_expr => {
+                    return Ok(Box::new(ast::ExprUnit {
+                        pos,
+                        inner: ast::ExprUnitInner::ArithExpr(self.parse_arith_expr(inner)?),
+                    }));
+                }
+                Rule::fn_call => {
+                    return Ok(Box::new(ast::ExprUnit {
+                        pos,
+                        inner: ast::ExprUnitInner::FnCall(self.parse_fn_call(inner)?),
+                    }));
+                }
+                Rule::num => {
+                    use super::common::parse_num;
+                    let num = parse_num(inner)?;
+                    return Ok(Box::new(ast::ExprUnit {
+                        pos,
+                        inner: ast::ExprUnitInner::Num(num),
+                    }));
+                }
+                Rule::identifier => {
+                    return Ok(Box::new(ast::ExprUnit {
+                        pos,
+                        inner: ast::ExprUnitInner::Id(inner.as_str().to_string()),
+                    }));
+                }
+                _ => {}
+            }
+        }
+        Err(grammar_error("range_bound", &pair_for_error))
+    }
+
+    fn parse_for_stmt(&self, pair: Pair) -> ParseResult<Box<ast::ForStmt>> {
+        let pair_for_error = pair.clone();
+        let mut var = None;
+        let mut start = None;
+        let mut end = None;
+        let mut stmts = Vec::new();
+
+        let inner_pairs: Vec<_> = pair.into_inner().collect();
+        let mut i = 0;
+
+        // Parse: kw_for ~ identifier ~ kw_in ~ range_bound ~ ".." ~ range_bound ~ lbrace ~ code_block_stmt* ~ rbrace
+        while i < inner_pairs.len() {
+            match inner_pairs[i].as_rule() {
+                Rule::identifier => {
+                    if var.is_none() {
+                        var = Some(inner_pairs[i].as_str().to_string());
+                    }
+                }
+                Rule::range_bound => {
+                    if start.is_none() {
+                        start = Some(self.parse_range_bound(inner_pairs[i].clone())?);
+                    } else if end.is_none() {
+                        end = Some(self.parse_range_bound(inner_pairs[i].clone())?);
+                    }
+                }
+                Rule::code_block_stmt => {
+                    stmts.push(*self.parse_code_block_stmt(inner_pairs[i].clone())?);
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+
+        Ok(Box::new(ast::ForStmt {
+            var: var.ok_or_else(|| grammar_error("for.var", &pair_for_error))?,
+            start: start.ok_or_else(|| grammar_error("for.start", &pair_for_error))?,
+            end: end.ok_or_else(|| grammar_error("for.end", &pair_for_error))?,
             stmts,
         }))
     }

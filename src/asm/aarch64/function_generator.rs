@@ -10,6 +10,15 @@ fn mangle_bb(func: &str, bb: usize) -> String {
     format!(".L{func}_bb{bb}")
 }
 
+fn lower_link_symbol(ir_name: &str, target: Target) -> String {
+    let base = if let Some(stripped) = ir_name.strip_prefix("std::") {
+        stripped.to_string()
+    } else {
+        ir_name.replace("::", "__")
+    };
+    target.mangle_symbol(&base)
+}
+
 #[derive(Debug, Clone)]
 pub enum PtrBase {
     Stack,
@@ -181,7 +190,7 @@ impl<'a> FunctionGenerator<'a> {
             self.emit_call_reg_arg(arg, i as u8)?;
         }
 
-        let func_name = self.target.mangle_symbol(&s.link_name);
+        let func_name = lower_link_symbol(&s.func_name, self.target);
         self.insts.push(Inst::Bl { func: func_name });
 
         if nargs > 8 {

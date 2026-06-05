@@ -60,14 +60,8 @@ pub struct BasicBlock {
 /// symbol with no body, typically imported from a `.teah` header) or a
 /// definition (body already generated).
 pub struct Function {
-    /// The source-level name of the function — possibly namespace-qualified
-    /// (e.g. `std::putint`, `Counter::get`).  Used as the registry key and
-    /// for diagnostics.
+    /// The source-level name of the function.
     pub identifier: String,
-    /// The linker-visible symbol for this function, produced once at
-    /// registration time by [`super::compute_link_name`].  Every backend
-    /// (LLVM IR printer, AArch64 assembler) emits this name verbatim.
-    pub link_name: String,
     /// Body of the function, or `None` for an external declaration.
     pub body: Option<FunctionBody>,
 }
@@ -202,27 +196,6 @@ impl<'ir> FunctionGenerator<'ir> {
         }
     }
 
-    /// Resolves a callee's source-level name (possibly namespace-qualified)
-    /// to the linker-visible symbol recorded at registration time.
-    ///
-    /// Callers are expected to have already validated that `source_name`
-    /// is a known function by consulting `registry.function_types`; any
-    /// entry in that map has a matching entry in `registry.link_names`,
-    /// so a missing link name indicates a broken invariant.
-    pub fn resolve_link_name(&self, source_name: &str) -> String {
-        self.registry
-            .link_names
-            .get(source_name)
-            .cloned()
-            .unwrap_or_else(|| {
-                panic!(
-                    "link name for callee {source_name:?} not registered — \
-                     every entry in registry.function_types must have a \
-                     matching entry in registry.link_names"
-                )
-            })
-    }
-
     /// Pushes a new empty lexical scope onto the scope stack.
     ///
     /// Call this before entering any block (e.g., `{` in the source language) so
@@ -309,12 +282,10 @@ impl FunctionGenerator<'_> {
         self.irs.push(Stmt::as_label(label));
     }
 
-    /// Emits a function-call instruction that invokes the callee identified
-    /// by `link_name` with `args`, optionally storing the return value in
-    /// `result`.  `link_name` must already be the linker-visible symbol —
-    /// see [`super::compute_link_name`].
-    pub fn emit_call(&mut self, link_name: String, result: Option<Operand>, args: Vec<Operand>) {
-        self.irs.push(Stmt::as_call(link_name, result, args));
+    /// Emits a function-call instruction that invokes `func_name` with `args`,
+    /// optionally storing the return value in `result`.
+    pub fn emit_call(&mut self, func_name: String, result: Option<Operand>, args: Vec<Operand>) {
+        self.irs.push(Stmt::as_call(func_name, result, args));
     }
 
     /// Emits a return instruction, optionally carrying a return value `val`.

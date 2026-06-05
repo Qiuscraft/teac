@@ -1,6 +1,6 @@
 use crate::ast;
 
-use super::common::{get_pos, grammar_error, parse_num, Pair, ParseResult, Rule};
+use super::common::{get_pos, grammar_error, parse_float, parse_num, Pair, ParseResult, Rule};
 use super::ParseContext;
 
 impl<'a> ParseContext<'a> {
@@ -469,44 +469,158 @@ impl<'a> ParseContext<'a> {
             .cloned()
             .collect();
 
+        // Handle negative numbers: -num (with optional cast)
         // `-<num>` — negated integer literal.
-        if filtered.len() == 2
+        if filtered.len() >= 2
             && filtered[0].as_rule() == Rule::op_sub
             && filtered[1].as_rule() == Rule::num
         {
             let num = parse_num(filtered[1].clone())?;
-            return Ok(Box::new(ast::ExprUnit {
+            let expr_unit = Box::new(ast::ExprUnit {
                 pos,
                 inner: ast::ExprUnitInner::Num(-num),
-            }));
+            });
+
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec)
+            {
+                let target_type = self
+                    .parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+
+            return Ok(expr_unit);
         }
 
-        // `(<arith_expr>)` — parenthesised arithmetic expression.
-        if filtered.len() == 1 && filtered[0].as_rule() == Rule::arith_expr {
-            return Ok(Box::new(ast::ExprUnit {
+        // Handle negative floats: -float_literal (with optional cast)
+        if filtered.len() >= 2
+            && filtered[0].as_rule() == Rule::op_sub
+            && filtered[1].as_rule() == Rule::float_literal
+        {
+            let float_val = parse_float(filtered[1].clone())?;
+            let expr_unit = Box::new(ast::ExprUnit {
                 pos,
-                inner: ast::ExprUnitInner::ArithExpr(self.parse_arith_expr(filtered[0].clone())?),
-            }));
+                inner: ast::ExprUnitInner::Float(-float_val),
+            });
+
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec)
+            {
+                let target_type = self
+                    .parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+
+            return Ok(expr_unit);
         }
 
+        // Handle parenthesized arithmetic expression (with optional cast)
+        if filtered.len() >= 1 && filtered[0].as_rule() == Rule::arith_expr {
+            let arith_expr = self.parse_arith_expr(filtered[0].clone())?;
+            let expr_unit = Box::new(ast::ExprUnit {
+                pos,
+                inner: ast::ExprUnitInner::ArithExpr(arith_expr),
+            });
+
+            // Check for cast
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec) {
+                let target_type = self.parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+            return Ok(expr_unit);
+        }
+
+        // Handle function call (with optional cast)
         // `<fn_call>` — a function or method call.
         if !filtered.is_empty() && filtered[0].as_rule() == Rule::fn_call {
-            return Ok(Box::new(ast::ExprUnit {
+            let fn_call = self.parse_fn_call(filtered[0].clone())?;
+            let expr_unit = Box::new(ast::ExprUnit {
                 pos,
-                inner: ast::ExprUnitInner::FnCall(self.parse_fn_call(filtered[0].clone())?),
-            }));
+                inner: ast::ExprUnitInner::FnCall(fn_call),
+            });
+
+            // Check for cast
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec) {
+                let target_type = self.parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+            return Ok(expr_unit);
         }
 
-        // `<num>` — plain integer literal.
-        if filtered.len() == 1 && filtered[0].as_rule() == Rule::num {
+        // Handle float literal (with optional cast)
+        if filtered.len() >= 1 && filtered[0].as_rule() == Rule::float_literal {
+            let float_val = parse_float(filtered[0].clone())?;
+            let expr_unit = Box::new(ast::ExprUnit {
+                pos,
+                inner: ast::ExprUnitInner::Float(float_val),
+            });
+
+            // Check for cast
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec) {
+                let target_type = self.parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+            return Ok(expr_unit);
+        }
+
+        // Handle integer literal (with optional cast)
+        if filtered.len() >= 1 && filtered[0].as_rule() == Rule::num {
             let num = parse_num(filtered[0].clone())?;
-            return Ok(Box::new(ast::ExprUnit {
+            let expr_unit = Box::new(ast::ExprUnit {
                 pos,
                 inner: ast::ExprUnitInner::Num(num),
-            }));
+            });
+
+            // Check for cast
+            if let Some(type_spec_pair) = filtered.iter().find(|p| p.as_rule() == Rule::type_spec) {
+                let target_type = self.parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+            return Ok(expr_unit);
         }
 
         // `&<identifier>` — a reference to a variable.
+        // Handle reference: &identifier
         if filtered.len() == 2
             && filtered[0].as_rule() == Rule::ampersand
             && filtered[1].as_rule() == Rule::identifier
@@ -519,6 +633,7 @@ impl<'a> ParseContext<'a> {
         }
 
         // `<identifier> (<expr_suffix>)*` — variable or field/index access.
+        // Handle identifier with optional suffix and cast
         if !inner_pairs.is_empty() && inner_pairs[0].as_rule() == Rule::identifier {
             let id = inner_pairs[0].as_str().to_string();
 
@@ -540,7 +655,21 @@ impl<'a> ParseContext<'a> {
                 }
             }
 
-            return left_val_to_expr_unit(*base);
+            let expr_unit = left_val_to_expr_unit(*base)?;
+
+            // Check for cast
+            if let Some(type_spec_pair) = inner_pairs.iter().find(|p| p.as_rule() == Rule::type_spec) {
+                let target_type = self.parse_type_spec(type_spec_pair.clone())?
+                    .ok_or_else(|| grammar_error("cast.target_type", &pair_for_error))?;
+                return Ok(Box::new(ast::ExprUnit {
+                    pos,
+                    inner: ast::ExprUnitInner::Cast(Box::new(ast::CastExpr {
+                        expr: expr_unit,
+                        target_type,
+                    })),
+                }));
+            }
+            return Ok(expr_unit);
         }
 
         Err(grammar_error("expr_unit", &pair_for_error))

@@ -19,7 +19,10 @@ pub enum Error {
     StructInitialization,
 
     #[error("Module '{module_name}' not found: expected header file at '{}'", path.display())]
-    ModuleNotFound { module_name: String, path: PathBuf },
+    ModuleNotFound {
+        module_name: String,
+        path: PathBuf,
+    },
 
     #[error("Failed to parse module '{module_name}': {message}")]
     ModuleParseFailed {
@@ -38,15 +41,6 @@ pub enum Error {
 
     #[error("Conflicted definition of function {symbol}")]
     ConflictedFunction { symbol: String },
-
-    #[error(
-        "Function {symbol} lowers to linker symbol '{link_name}', which is already used by {existing}"
-    )]
-    ConflictedLinkName {
-        symbol: String,
-        existing: String,
-        link_name: String,
-    },
 
     #[error("Mismatched declaration and definition of {symbol}")]
     DeclDefMismatch { symbol: String },
@@ -85,6 +79,11 @@ pub enum Error {
 
     #[error("Function '{symbol}' has unsupported return type '{dtype}'")]
     UnsupportedReturnType { symbol: String, dtype: Dtype },
+    #[error("Unsupported feature: {feature}")]
+    UnsupportedFeature { feature: String },
+
+    #[error("Unsupported return type")]
+    ReturnTypeUnsupported,
 
     #[error("Struct type '{member_type}' used in struct '{struct_name}' is not defined")]
     UndefinedStructMemberType {

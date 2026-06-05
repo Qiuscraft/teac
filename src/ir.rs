@@ -12,57 +12,9 @@ pub mod stmt;
 pub mod types;
 pub mod value;
 
-use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::ast;
-
-/// Resolves a source-level function name to the symbol name exposed to
-/// the linker.
-///
-/// teac uses namespace-qualified function names at the source level
-/// (`std::putint`, `Counter::get`) to keep the human-facing name space
-/// clean, but the linker only sees flat C-style symbols.  This function
-/// is the single place where that mapping is defined; both the LLVM IR
-/// printer and the AArch64 assembler consume its output verbatim.
-///
-/// Three rules, chosen to be orthogonal and stable:
-///
-/// * **External functions** (`is_external = true`, i.e. declarations
-///   coming from a `.teah` header) are mapped to their last path
-///   segment.  This mirrors C++ `extern "C"` blocks: the source-level
-///   name is namespaced for the programmer, while the link-level name
-///   matches the runtime's bare C symbol (`std::putint` -> `putint`).
-///
-/// * **Unqualified user functions** (`a_single_ident`) are exported
-///   unchanged.  This preserves the natural identity for the
-///   overwhelmingly common case.
-///
-/// * **Qualified user functions** (e.g. `Counter::get` produced by an
-///   `impl` block) are encoded using an Itanium-C++-ABI-inspired
-///   scheme: `_TN` + length-prefixed segments + `E`, so
-///   `Counter::get` -> `_TN7Counter3getE`.  The `_T` vendor prefix
-///   avoids collisions with real C++ symbols (`_Z...`) while keeping
-///   the mangling unambiguous and reversible.
-pub(crate) fn compute_link_name(source_name: &str, is_external: bool) -> String {
-    if is_external {
-        source_name
-            .rsplit("::")
-            .next()
-            .expect("rsplit on a non-empty str always yields at least one segment")
-            .to_string()
-    } else if source_name.contains("::") {
-        let mut mangled = String::from("_TN");
-        for segment in source_name.split("::") {
-            write!(mangled, "{}{segment}", segment.len())
-                .expect("writing into a String cannot fail");
-        }
-        mangled.push('E');
-        mangled
-    } else {
-        source_name.to_string()
-    }
-}
 
 pub use error::Error;
 pub use function::{BasicBlock, BlockLabel, Function, FunctionBody};

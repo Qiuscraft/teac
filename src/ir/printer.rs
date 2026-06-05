@@ -56,9 +56,9 @@ impl<W: Write> IrPrinter<W> {
                 })?;
             match &func.body {
                 Some(body) => {
-                    self.emit_function_def(&func.link_name, &func_type.return_dtype, body)?
+                    self.emit_function_def(&func.identifier, &func_type.return_dtype, body)?
                 }
-                None => self.emit_function_decl(&func.link_name, func_type)?,
+                None => self.emit_function_decl(&func.identifier, func_type)?,
             }
         }
 
@@ -116,7 +116,7 @@ impl<W: Write> IrPrinter<W> {
 
     pub fn emit_function_def(
         &mut self,
-        link_name: &str,
+        identifier: &str,
         return_dtype: &Dtype,
         body: &FunctionBody,
     ) -> Result<(), Error> {
@@ -135,7 +135,7 @@ impl<W: Write> IrPrinter<W> {
 
         writeln!(
             self.writer,
-            "define dso_local {return_dtype} @{link_name}({args}) {{",
+            "define dso_local {return_dtype} @{identifier}({args}) {{",
         )?;
         for block in &body.blocks {
             writeln!(self.writer, "{}:", block.label)?;
@@ -150,7 +150,7 @@ impl<W: Write> IrPrinter<W> {
 
     pub fn emit_function_decl(
         &mut self,
-        link_name: &str,
+        identifier: &str,
         func_type: &FunctionType,
     ) -> Result<(), Error> {
         let args = func_type
@@ -162,7 +162,7 @@ impl<W: Write> IrPrinter<W> {
 
         writeln!(
             self.writer,
-            "declare dso_local {} @{link_name}({args})",
+            "declare dso_local {} @{identifier}({args})",
             func_type.return_dtype,
         )?;
         writeln!(self.writer)?;
