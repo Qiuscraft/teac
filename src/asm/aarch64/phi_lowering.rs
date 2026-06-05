@@ -170,6 +170,7 @@ fn next_basic_block_id(labels: &[BlockLabel]) -> usize {
 fn same_operand(lhs: &Operand, rhs: &Operand) -> bool {
     match (lhs, rhs) {
         (Operand::Const(l), Operand::Const(r)) => l.val == r.val,
+        (Operand::FloatConst(l), Operand::FloatConst(r)) => l.val == r.val,
         (Operand::Local(l), Operand::Local(r)) => l.id == r.id,
         (Operand::Global(l), Operand::Global(r)) => l.name == r.name,
         _ => false,

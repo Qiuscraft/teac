@@ -8,7 +8,7 @@
 
 use super::error::Error;
 use super::module::Registry;
-use super::stmt::{ArithBinOp, CmpPredicate, Stmt};
+use super::stmt::{ArithBinOp, CmpPredicate, FloatBinOp, FloatCmpPredicate, Stmt};
 use super::types::Dtype;
 use super::value::{GlobalDef, GlobalRef, Local, LocalId, Operand};
 use indexmap::IndexMap;
@@ -259,10 +259,36 @@ impl FunctionGenerator<'_> {
         self.irs.push(Stmt::as_biop(op, left, right, dst));
     }
 
+    /// Emits a floating-point arithmetic binary operation (`op`).
+    pub fn emit_fbiop(&mut self, op: FloatBinOp, left: Operand, right: Operand, dst: Operand) {
+        self.irs.push(Stmt::as_fbiop(op, left, right, dst));
+    }
+
     /// Emits an integer comparison instruction using predicate `op` on `left` and
     /// `right`, storing the boolean result in `dst`.
     pub fn emit_cmp(&mut self, op: CmpPredicate, left: Operand, right: Operand, dst: Operand) {
         self.irs.push(Stmt::as_cmp(op, left, right, dst));
+    }
+
+    /// Emits a floating-point comparison instruction.
+    pub fn emit_fcmp(
+        &mut self,
+        op: FloatCmpPredicate,
+        left: Operand,
+        right: Operand,
+        dst: Operand,
+    ) {
+        self.irs.push(Stmt::as_fcmp(op, left, right, dst));
+    }
+
+    /// Emits a signed integer to floating-point conversion.
+    pub fn emit_sitofp(&mut self, src: Operand, dst: Operand) {
+        self.irs.push(Stmt::as_sitofp(src, dst));
+    }
+
+    /// Emits a floating-point to signed integer conversion.
+    pub fn emit_fptosi(&mut self, src: Operand, dst: Operand) {
+        self.irs.push(Stmt::as_fptosi(src, dst));
     }
 
     /// Emits a conditional branch instruction that jumps to `true_label` when `cond`

@@ -12,6 +12,7 @@ pub mod stmt;
 pub mod types;
 pub mod value;
 
+use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
 use crate::ast;
@@ -30,6 +31,43 @@ pub(crate) use crate::experimental::ReturnInferPass;
 // submodules directly.  Not part of the public `ir` API.
 #[cfg(feature = "return-type-inference")]
 pub(crate) use gen::conversions::compose_var_def_dtype;
+
+/// Formats a source-level symbol as an LLVM identifier body.
+///
+/// LLVM bare identifiers cannot contain characters such as `:`, so imported
+/// TeaLang names like `std::putint` must be emitted as quoted identifiers.
+pub(crate) struct LlvmIdent<'a>(pub &'a str);
+
+impl Display for LlvmIdent<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let s = self.0;
+        let mut chars = s.chars();
+        let bare_start = chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '_' | '$' | '.'));
+        let bare_rest = s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '.'));
+        if bare_start && bare_rest {
+            return write!(f, "{s}");
+        }
+
+        write!(f, "\"")?;
+        for b in s.bytes() {
+            match b {
+                b'\\' => write!(f, "\\5C")?,
+                b'"' => write!(f, "\\22")?,
+                0x20..=0x7e => write!(f, "{}", b as char)?,
+                _ => write!(f, "\\{b:02X}")?,
+            }
+        }
+        write!(f, "\"")
+    }
+}
+
+pub(crate) fn llvm_symbol_name(ir_name: &str) -> &str {
+    ir_name.strip_prefix("std::").unwrap_or(ir_name)
+}
 
 /// Install teac's default module-level pass pipeline on `gen`.
 ///

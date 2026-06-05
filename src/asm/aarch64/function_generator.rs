@@ -474,6 +474,9 @@ impl<'a> FunctionGenerator<'a> {
     fn lower_int(&self, val: &ir::Operand) -> Result<Operand, Error> {
         match val {
             ir::Operand::Const(c) => Ok(Operand::Immediate(c.val)),
+            ir::Operand::FloatConst(_) => Err(Error::UnsupportedOperand {
+                what: format!("unsupported floating-point operand: {}", val),
+            }),
             ir::Operand::Local(l) => {
                 if !matches!(l.dtype, ir::Dtype::I1 | ir::Dtype::I32) {
                     return Err(Error::UnsupportedDtype {
@@ -511,6 +514,9 @@ impl<'a> FunctionGenerator<'a> {
     fn lower_value(&self, val: &ir::Operand) -> Result<(Operand, RegSize), Error> {
         match val {
             ir::Operand::Const(c) => Ok((Operand::Immediate(c.val), RegSize::W32)),
+            ir::Operand::FloatConst(_) => Err(Error::UnsupportedOperand {
+                what: format!("unsupported floating-point operand: {}", val),
+            }),
             ir::Operand::Local(l) => {
                 let size = match &l.dtype {
                     ir::Dtype::I1 | ir::Dtype::I32 => RegSize::W32,
@@ -581,7 +587,7 @@ impl<'a> FunctionGenerator<'a> {
                 PtrBase::Global(self.target.mangle_symbol(&g.name)),
                 None,
             )),
-            ir::Operand::Const(_) => Err(Error::UnsupportedOperand {
+            ir::Operand::Const(_) | ir::Operand::FloatConst(_) => Err(Error::UnsupportedOperand {
                 what: format!("unsupported pointer operand: {}", val),
             }),
         }
@@ -590,6 +596,9 @@ impl<'a> FunctionGenerator<'a> {
     fn lower_index(&self, val: &ir::Operand) -> Result<IndexOperand, Error> {
         match val {
             ir::Operand::Const(c) => Ok(IndexOperand::Imm(c.val)),
+            ir::Operand::FloatConst(_) => Err(Error::UnsupportedOperand {
+                what: format!("unsupported floating-point index operand: {}", val),
+            }),
             ir::Operand::Local(l) => {
                 if !matches!(l.dtype, ir::Dtype::I1 | ir::Dtype::I32) {
                     return Err(Error::UnsupportedDtype {
@@ -612,6 +621,9 @@ impl<'a> FunctionGenerator<'a> {
     fn lower_index_imm(&self, val: &ir::Operand) -> Result<i64, Error> {
         match val {
             ir::Operand::Const(c) => Ok(c.val),
+            ir::Operand::FloatConst(_) => Err(Error::UnsupportedOperand {
+                what: format!("expected integer immediate index, got: {}", val),
+            }),
             _ => Err(Error::UnsupportedOperand {
                 what: format!("expected immediate struct field index, got: {}", val),
             }),
@@ -629,6 +641,9 @@ impl<'a> FunctionGenerator<'a> {
             Store(s) => self.emit_store(s),
             Load(s) => self.emit_load(s),
             BiOp(s) => self.emit_biop(s),
+            FBiOp(_) | FCmp(_) | SIToFP(_) | FPToSI(_) => Err(Error::UnsupportedOperand {
+                what: "floating-point IR is not supported by the AArch64 backend".into(),
+            }),
             Cmp(s) => self.emit_cmp(s),
             CJump(s) => self.emit_cjump(s),
             Jump(s) => {
@@ -650,6 +665,11 @@ impl<'a> FunctionGenerator<'a> {
 
         let src_op = match src {
             ir::Operand::Const(c) => Operand::Immediate(c.val),
+            ir::Operand::FloatConst(_) => {
+                return Err(Error::UnsupportedOperand {
+                    what: "floating-point phi copy".into(),
+                });
+            }
             ir::Operand::Local(l) => Operand::Register(Register::Virtual(l.id.0)),
             ir::Operand::Global(_) => {
                 return Err(Error::UnsupportedOperand {

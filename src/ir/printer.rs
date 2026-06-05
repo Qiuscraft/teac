@@ -3,6 +3,7 @@ use super::function::FunctionBody;
 use super::module::{Module, Registry};
 use super::types::{Dtype, FunctionType, StructType};
 use super::value::GlobalDef;
+use crate::ir::{llvm_symbol_name, LlvmIdent};
 use std::io::Write;
 
 /// LLVM-style target triple baked into every IR dump.  Kept alongside
@@ -79,7 +80,7 @@ impl<W: Write> IrPrinter<W> {
             .map(|e| format!("{}", e.1.dtype))
             .collect();
         let members = members.join(", ");
-        writeln!(self.writer, "%{name} = type {{ {members} }}")?;
+        writeln!(self.writer, "%{} = type {{ {members} }}", LlvmIdent(name))?;
         Ok(())
     }
 
@@ -108,7 +109,8 @@ impl<W: Write> IrPrinter<W> {
 
         writeln!(
             self.writer,
-            "@{name} = dso_local global {} {init_str}, align 4",
+            "@{} = dso_local global {} {init_str}, align 4",
+            LlvmIdent(name),
             def.dtype,
         )?;
         Ok(())
@@ -135,7 +137,8 @@ impl<W: Write> IrPrinter<W> {
 
         writeln!(
             self.writer,
-            "define dso_local {return_dtype} @{identifier}({args}) {{",
+            "define dso_local {return_dtype} @{}({args}) {{",
+            LlvmIdent(llvm_symbol_name(identifier)),
         )?;
         for block in &body.blocks {
             writeln!(self.writer, "{}:", block.label)?;
@@ -162,8 +165,9 @@ impl<W: Write> IrPrinter<W> {
 
         writeln!(
             self.writer,
-            "declare dso_local {} @{identifier}({args})",
+            "declare dso_local {} @{}({args})",
             func_type.return_dtype,
+            LlvmIdent(llvm_symbol_name(identifier)),
         )?;
         writeln!(self.writer)?;
         Ok(())

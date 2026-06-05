@@ -165,9 +165,7 @@ impl TypeInference<'_> {
             ast::CodeBlockStmtInner::While(s) => self.process_while(s),
             ast::CodeBlockStmtInner::Call(s) => self.check_call_args(&s.fn_call),
             ast::CodeBlockStmtInner::Return(s) => self.process_return(s),
-            ast::CodeBlockStmtInner::For(_) => Err(Error::UnsupportedFeature {
-                feature: "for-loop type inference".to_string(),
-            }),
+            ast::CodeBlockStmtInner::For(s) => self.process_for(s),
             ast::CodeBlockStmtInner::Continue(_)
             | ast::CodeBlockStmtInner::Break(_)
             | ast::CodeBlockStmtInner::Null(_) => Ok(()),
@@ -332,6 +330,18 @@ impl TypeInference<'_> {
         Ok(())
     }
 
+    fn process_for(&mut self, stmt: &ast::ForStmt) -> Result<(), Error> {
+        Self::check_compatible("for.start", &Dtype::I32, &self.type_of_expr_unit(&stmt.start)?)?;
+        Self::check_compatible("for.end", &Dtype::I32, &self.type_of_expr_unit(&stmt.end)?)?;
+
+        let mut body_env = self.env.clone();
+        body_env.insert(stmt.var.clone(), VarState::Resolved(Dtype::I32));
+        let mut body_ctx = self.fork(body_env);
+        body_ctx.process_stmts(&stmt.stmts)?;
+        self.merge_env_single(&body_ctx.env)?;
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Return
     // -----------------------------------------------------------------------
@@ -419,14 +429,34 @@ impl TypeInference<'_> {
 
     /// Compute the type of an arithmetic expression.
     fn type_of_arith_expr(&self, expr: &ast::ArithExpr) -> Result<Dtype, Error> {
-        match &expr.inner {
-            ast::ArithExprInner::ArithBiOpExpr(biop) => {
-                self.type_of_arith_expr(&biop.left)?;
-                self.type_of_arith_expr(&biop.right)?;
-                Ok(Dtype::I32)
-            }
-            ast::ArithExprInner::ExprUnit(unit) => self.type_of_expr_unit(unit),
+        let mut current = expr;
+        let mut rights = Vec::new();
+        while let ast::ArithExprInner::ArithBiOpExpr(biop) = &current.inner {
+            rights.push(&biop.right);
+            current = &biop.left;
         }
+
+        let dtype = match &current.inner {
+            ast::ArithExprInner::ExprUnit(unit) => self.type_of_expr_unit(unit)?,
+            ast::ArithExprInner::ArithBiOpExpr(_) => unreachable!(),
+        };
+
+        for right in rights.into_iter().rev() {
+            let right_type = self.type_of_arith_expr(right)?;
+            Self::check_compatible("<arithmetic>", &dtype, &right_type)?;
+            match dtype {
+                Dtype::I32 | Dtype::F32 => {}
+                ref other => {
+                    return Err(Error::TypeMismatch {
+                        symbol: "<arithmetic>".to_string(),
+                        expected: Dtype::I32,
+                        actual: other.clone(),
+                    })
+                }
+            }
+        }
+
+        Ok(dtype)
     }
 
     /// Compute the type of a leaf expression unit.
@@ -624,8 +654,9 @@ impl TypeInference<'_> {
     fn check_bool_unit(&self, unit: &ast::BoolUnit) -> Result<(), Error> {
         match &unit.inner {
             ast::BoolUnitInner::ComExpr(expr) => {
-                self.type_of_expr_unit(&expr.left)?;
-                self.type_of_expr_unit(&expr.right)?;
+                let left = self.type_of_expr_unit(&expr.left)?;
+                let right = self.type_of_expr_unit(&expr.right)?;
+                Self::check_compatible("<comparison>", &left, &right)?;
                 Ok(())
             }
             ast::BoolUnitInner::BoolExpr(expr) => self.check_bool_expr(expr),

@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::ir::LlvmIdent;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, PartialEq, Debug)]
@@ -48,9 +49,9 @@ impl Display for Dtype {
         match self {
             Dtype::I1 => write!(f, "i1"),
             Dtype::I32 => write!(f, "i32"),
-            Dtype::F32 => write!(f, "f32"),
+            Dtype::F32 => write!(f, "float"),
             Dtype::Void => write!(f, "void"),
-            Dtype::Struct { type_name } => write!(f, "%{type_name}"),
+            Dtype::Struct { type_name } => write!(f, "%{}", LlvmIdent(type_name)),
             Dtype::Pointer { .. } => write!(f, "ptr"),
             Dtype::Array {
                 element,
@@ -104,7 +105,7 @@ impl TryFrom<&ast::FnDecl> for FunctionType {
             .map_or(Dtype::Void, Dtype::from);
 
         match &return_dtype {
-            Dtype::Void | Dtype::I32 => {}
+            Dtype::Void | Dtype::I32 | Dtype::F32 => {}
             _ => {
                 return Err(crate::ir::Error::UnsupportedReturnType {
                     symbol: decl.identifier.clone(),
