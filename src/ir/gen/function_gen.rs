@@ -528,10 +528,10 @@ impl FunctionGenerator<'_> {
             None => {
                 self.emit_return(None);
             }
-            Some(val) => {
-                let val = self.handle_right_val(val)?;
-                let val = self.coerce_to(val, &self.current_return_dtype.clone());
-                self.emit_return(Some(val));
+            Some(return_val) => {
+                let operand = self.handle_right_val(return_val)?;
+                let coerced_operand = self.coerce_to(operand, &self.current_return_dtype.clone());
+                self.emit_return(Some(coerced_operand));
             }
         }
         Ok(())
