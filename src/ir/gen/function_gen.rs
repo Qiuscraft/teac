@@ -629,40 +629,7 @@ impl FunctionGenerator<'_> {
                 Ok(op)
             }
             ast::ExprUnitInner::ArithExpr(expr) => self.handle_arith_expr(expr),
-            ast::ExprUnitInner::FnCall(fn_call) => {
-                let name = fn_call.qualified_name();
-                let return_dtype = &self
-                    .registry
-                    .function_types
-                    .get(&name)
-                    .ok_or_else(|| Error::InvalidExprUnit {
-                        expr_unit: unit.clone(),
-                    })?
-                    .return_dtype;
-
-                let res = match return_dtype {
-                    Dtype::I32 => Operand::from(self.fresh_local(Dtype::I32)),
-                    Dtype::F32 => Operand::from(self.fresh_local(Dtype::F32)),
-                    Dtype::Void => {
-                        return Err(Error::InvalidExprUnit {
-                            expr_unit: unit.clone(),
-                        });
-                    }
-                    other => unreachable!(
-                        "registered function {name} has return type {other} \
-                         which FunctionType::try_from should have rejected"
-                    ),
-                };
-
-                let mut args: Vec<Operand> = Vec::new();
-                for arg in &fn_call.vals {
-                    let rval = self.handle_right_val(arg)?;
-                    args.push(rval);
-                }
-                self.emit_call(name, Some(res.clone()), args);
-
-                Ok(res)
-            }
+            ast::ExprUnitInner::FnCall(fn_call) => self.handle_fn_call(fn_call, unit),
             ast::ExprUnitInner::ArrayExpr(expr) => self.handle_array_expr(expr),
             ast::ExprUnitInner::MemberExpr(expr) => self.handle_member_expr(expr),
             ast::ExprUnitInner::Reference(id) => {
@@ -689,6 +656,50 @@ impl FunctionGenerator<'_> {
             }
             _ => operand,
         })
+    }
+
+    /// Lowers a function call used as an expression.
+    ///
+    /// Void-returning functions are invalid expression units, so this always
+    /// allocates a result local and emits a `call` with a return destination.
+    fn handle_fn_call(
+        &mut self,
+        fn_call: &ast::FnCall,
+        expr_unit: &ast::ExprUnit,
+    ) -> Result<Operand, Error> {
+        let name = fn_call.qualified_name();
+        let return_dtype = self
+            .registry
+            .function_types
+            .get(&name)
+            .ok_or_else(|| Error::InvalidExprUnit {
+                expr_unit: expr_unit.clone(),
+            })?
+            .return_dtype
+            .clone();
+
+        let res = match return_dtype {
+            Dtype::I32 => Operand::from(self.fresh_local(Dtype::I32)),
+            Dtype::F32 => Operand::from(self.fresh_local(Dtype::F32)),
+            Dtype::Void => {
+                return Err(Error::InvalidExprUnit {
+                    expr_unit: expr_unit.clone(),
+                });
+            }
+            other => unreachable!(
+                "registered function {name} has return type {other} \
+                 which FunctionType::try_from should have rejected"
+            ),
+        };
+
+        let mut args: Vec<Operand> = Vec::new();
+        for arg in &fn_call.vals {
+            let rval = self.handle_right_val(arg)?;
+            args.push(rval);
+        }
+        self.emit_call(name, Some(res.clone()), args);
+
+        Ok(res)
     }
 
     /// Lowers a reference expression (`&id`) to a pointer to the array's first element.
