@@ -431,34 +431,23 @@ impl TypeInference<'_> {
 
     /// Compute the type of an arithmetic expression.
     fn type_of_arith_expr(&self, expr: &ast::ArithExpr) -> Result<Dtype, Error> {
-        let mut current = expr;
-        let mut rights = Vec::new();
-        while let ast::ArithExprInner::ArithBiOpExpr(biop) = &current.inner {
-            rights.push(&biop.right);
-            current = &biop.left;
-        }
+        match &expr.inner {
+            ast::ArithExprInner::ExprUnit(unit) => self.type_of_expr_unit(unit),
+            ast::ArithExprInner::ArithBiOpExpr(biop) => {
+                let left_type = self.type_of_arith_expr(&biop.left)?;
+                let right_type = self.type_of_arith_expr(&biop.right)?;
+                let dtype = Self::common_numeric_type("<arithmetic>", &left_type, &right_type)?;
 
-        let mut dtype = match &current.inner {
-            ast::ArithExprInner::ExprUnit(unit) => self.type_of_expr_unit(unit)?,
-            ast::ArithExprInner::ArithBiOpExpr(_) => unreachable!(),
-        };
-
-        for right in rights.into_iter().rev() {
-            let right_type = self.type_of_arith_expr(right)?;
-            dtype = Self::common_numeric_type("<arithmetic>", &dtype, &right_type)?;
-            match dtype {
-                Dtype::I32 | Dtype::F32 => {}
-                ref other => {
-                    return Err(Error::TypeMismatch {
+                match dtype {
+                    Dtype::I32 | Dtype::F32 => Ok(dtype),
+                    other => Err(Error::TypeMismatch {
                         symbol: "<arithmetic>".to_string(),
                         expected: Dtype::I32,
-                        actual: other.clone(),
-                    })
+                        actual: other,
+                    }),
                 }
             }
         }
-
-        Ok(dtype)
     }
 
     /// Compute the type of a leaf expression unit.
