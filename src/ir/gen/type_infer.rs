@@ -218,7 +218,7 @@ impl TypeInference<'_> {
                 let rhs_type = self.type_of_right_val(&scalar.val)?;
                 let resolved = match &explicit_dtype {
                     Some(t) => {
-                        Self::check_compatible(id, t, &rhs_type)?;
+                        Self::check_assignable(id, t, &rhs_type)?;
                         t.clone()
                     }
                     None => rhs_type,
@@ -271,7 +271,7 @@ impl TypeInference<'_> {
                         self.env.insert(id.clone(), VarState::Resolved(rhs_type));
                     }
                     Some(VarState::Resolved(t)) => {
-                        Self::check_compatible(id, &t, &rhs_type)?;
+                        Self::check_assignable(id, &t, &rhs_type)?;
                     }
                     None => {
                         // Variable not in local env — it may be a global.
@@ -281,10 +281,12 @@ impl TypeInference<'_> {
                 }
             }
             ast::LeftValInner::ArrayExpr(expr) => {
-                self.type_of_left_val_array(expr)?;
+                let left_type = self.type_of_left_val_array(expr)?;
+                Self::check_assignable("<array assignment>", &left_type, &rhs_type)?;
             }
             ast::LeftValInner::MemberExpr(expr) => {
-                self.type_of_member_expr(expr)?;
+                let left_type = self.type_of_member_expr(expr)?;
+                Self::check_assignable("<member assignment>", &left_type, &rhs_type)?;
             }
         }
         Ok(())
@@ -436,14 +438,14 @@ impl TypeInference<'_> {
             current = &biop.left;
         }
 
-        let dtype = match &current.inner {
+        let mut dtype = match &current.inner {
             ast::ArithExprInner::ExprUnit(unit) => self.type_of_expr_unit(unit)?,
             ast::ArithExprInner::ArithBiOpExpr(_) => unreachable!(),
         };
 
         for right in rights.into_iter().rev() {
             let right_type = self.type_of_arith_expr(right)?;
-            Self::check_compatible("<arithmetic>", &dtype, &right_type)?;
+            dtype = Self::common_numeric_type("<arithmetic>", &dtype, &right_type)?;
             match dtype {
                 Dtype::I32 | Dtype::F32 => {}
                 ref other => {
@@ -656,7 +658,7 @@ impl TypeInference<'_> {
             ast::BoolUnitInner::ComExpr(expr) => {
                 let left = self.type_of_expr_unit(&expr.left)?;
                 let right = self.type_of_expr_unit(&expr.right)?;
-                Self::check_compatible("<comparison>", &left, &right)?;
+                Self::common_numeric_type("<comparison>", &left, &right)?;
                 Ok(())
             }
             ast::BoolUnitInner::BoolExpr(expr) => self.check_bool_expr(expr),
@@ -677,5 +679,41 @@ impl TypeInference<'_> {
             expected: expected.clone(),
             actual: actual.clone(),
         })
+    }
+
+    fn check_assignable(symbol: &str, expected: &Dtype, actual: &Dtype) -> Result<(), Error> {
+        if expected == actual || Self::can_numeric_coerce(expected, actual) {
+            return Ok(());
+        }
+        Err(Error::TypeMismatch {
+            symbol: symbol.to_string(),
+            expected: expected.clone(),
+            actual: actual.clone(),
+        })
+    }
+
+    fn common_numeric_type(symbol: &str, left: &Dtype, right: &Dtype) -> Result<Dtype, Error> {
+        if left == right {
+            return Ok(left.clone());
+        }
+        if matches!(left, Dtype::F32 | Dtype::I32 | Dtype::I1)
+            && matches!(right, Dtype::F32 | Dtype::I32 | Dtype::I1)
+        {
+            return if matches!(left, Dtype::F32) || matches!(right, Dtype::F32) {
+                Ok(Dtype::F32)
+            } else {
+                Ok(Dtype::I32)
+            };
+        }
+        Err(Error::TypeMismatch {
+            symbol: symbol.to_string(),
+            expected: left.clone(),
+            actual: right.clone(),
+        })
+    }
+
+    fn can_numeric_coerce(expected: &Dtype, actual: &Dtype) -> bool {
+        matches!(expected, Dtype::F32) && matches!(actual, Dtype::I32 | Dtype::I1)
+            || matches!(expected, Dtype::I32) && matches!(actual, Dtype::F32)
     }
 }

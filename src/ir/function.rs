@@ -115,6 +115,8 @@ pub struct FunctionGenerator<'ir> {
     /// Counter for allocating unique basic block label indices; starts at `1`
     /// because index `0` is reserved for the implicit function-entry block.
     pub next_basic_block: usize,
+    /// Return type of the function currently being lowered.
+    pub current_return_dtype: Dtype,
 }
 
 impl<'ir> FunctionGenerator<'ir> {
@@ -139,6 +141,7 @@ impl<'ir> FunctionGenerator<'ir> {
             arguments: Vec::new(),
             next_vreg: 0,
             next_basic_block: 1,
+            current_return_dtype: Dtype::Void,
         }
     }
 

@@ -27,6 +27,13 @@ fn array_index_operand(index: usize) -> Operand {
     )
 }
 
+fn pointee_or_value_dtype(dtype: &Dtype) -> Dtype {
+    match dtype {
+        Dtype::Pointer { pointee } => pointee.as_ref().clone(),
+        other => other.clone(),
+    }
+}
+
 // ── Function entry-point generation ──────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
@@ -54,6 +61,7 @@ impl FunctionGenerator<'_> {
 
         let arguments = function_type.arguments.clone();
         let return_dtype = function_type.return_dtype.clone();
+        self.current_return_dtype = return_dtype.clone();
         self.emit_label(BlockLabel::Function(identifier.clone()));
 
         // Spill every argument to the stack (alloca + store) so they are addressable.
@@ -103,6 +111,44 @@ impl FunctionGenerator<'_> {
 // ── Statement handlers ────────────────────────────────────────────────────────
 
 impl FunctionGenerator<'_> {
+    /// 将 i32/i1 操作数提升为 f32（已经是 f32 则不变）。
+    fn coerce_to_f32(&mut self, operand: Operand) -> Operand {
+        match operand.dtype() {
+            Dtype::F32 => operand,
+            Dtype::I32 | Dtype::I1 => {
+                let dst = Operand::from(self.fresh_local(Dtype::F32));
+                self.emit_sitofp(operand, dst.clone());
+                dst
+            }
+            _ => operand,
+        }
+    }
+
+    /// 将 f32 操作数截断为 i32（已经是 i32 则不变）。
+    fn coerce_to_i32(&mut self, operand: Operand) -> Operand {
+        match operand.dtype() {
+            Dtype::I32 => operand,
+            Dtype::F32 => {
+                let dst = Operand::from(self.fresh_local(Dtype::I32));
+                self.emit_fptosi(operand, dst.clone());
+                dst
+            }
+            _ => operand,
+        }
+    }
+
+    /// 根据目标类型选择 coerce_to_f32 或 coerce_to_i32（类型已匹配则不变）。
+    fn coerce_to(&mut self, operand: Operand, target: &Dtype) -> Operand {
+        if operand.dtype() == target {
+            return operand;
+        }
+        match target {
+            Dtype::F32 => self.coerce_to_f32(operand),
+            Dtype::I32 => self.coerce_to_i32(operand),
+            _ => operand,
+        }
+    }
+
     /// Dispatches a single code-block statement to the appropriate handler.
     ///
     /// `con_label` and `bre_label` are the jump targets for `continue` and
@@ -139,6 +185,8 @@ impl FunctionGenerator<'_> {
     pub fn handle_assignment_stmt(&mut self, stmt: &AssignmentStmt) -> Result<(), Error> {
         let left = self.handle_left_val(&stmt.left_val)?;
         let right = self.handle_right_val(&stmt.right_val)?;
+        let target = pointee_or_value_dtype(left.dtype());
+        let right = self.coerce_to(right, &target);
         self.emit_store(right, left);
         Ok(())
     }
@@ -179,6 +227,7 @@ impl FunctionGenerator<'_> {
     ///
     /// Combines [`allocate_pointer_local`] with an immediate `store` instruction.
     fn define_scalar_local(&mut self, pointee: Dtype, right_val: Operand) -> Local {
+        let right_val = self.coerce_to(right_val, &pointee);
         let local = self.allocate_pointer_local(pointee);
         self.emit_store(right_val, Operand::from(&local));
         local
@@ -481,6 +530,7 @@ impl FunctionGenerator<'_> {
             }
             Some(val) => {
                 let val = self.handle_right_val(val)?;
+                let val = self.coerce_to(val, &self.current_return_dtype.clone());
                 self.emit_return(Some(val));
             }
         }
@@ -522,15 +572,14 @@ impl FunctionGenerator<'_> {
         let left = self.handle_expr_unit(&expr.left)?;
         let right = self.handle_expr_unit(&expr.right)?;
 
-        if left.dtype() != right.dtype() {
-            return Err(Error::TypeMismatch {
-                symbol: "<comparison>".to_string(),
-                expected: left.dtype().clone(),
-                actual: right.dtype().clone(),
-            });
-        }
-
-        let cmp_dtype = left.dtype().clone();
+        let cmp_dtype = if matches!(left.dtype(), Dtype::F32) || matches!(right.dtype(), Dtype::F32)
+        {
+            Dtype::F32
+        } else {
+            left.dtype().clone()
+        };
+        let left = self.coerce_to(left, &cmp_dtype);
+        let right = self.coerce_to(right, &cmp_dtype);
         let dst = Operand::from(self.fresh_local(Dtype::I1));
         match cmp_dtype {
             Dtype::F32 => self.emit_fcmp(
@@ -700,15 +749,8 @@ impl FunctionGenerator<'_> {
         let target = Dtype::from(&expr.target_type);
         match (&src_dtype, &target) {
             (src_dtype, target_dtype) if src_dtype == target_dtype => Ok(src),
-            (Dtype::I32, Dtype::F32) => {
-                let dst = Operand::from(self.fresh_local(Dtype::F32));
-                self.emit_sitofp(src, dst.clone());
-                Ok(dst)
-            }
-            (Dtype::F32, Dtype::I32) => {
-                let dst = Operand::from(self.fresh_local(Dtype::I32));
-                self.emit_fptosi(src, dst.clone());
-                Ok(dst)
+            (Dtype::I32 | Dtype::I1, Dtype::F32) | (Dtype::F32, Dtype::I32) => {
+                Ok(self.coerce_to(src, &target))
             }
             (src_dtype, target_dtype) => Err(Error::TypeMismatch {
                 symbol: "<cast>".to_string(),
@@ -822,15 +864,13 @@ impl FunctionGenerator<'_> {
         left: Operand,
         right: Operand,
     ) -> Result<Operand, Error> {
-        if left.dtype() != right.dtype() {
-            return Err(Error::TypeMismatch {
-                symbol: "<arithmetic>".to_string(),
-                expected: left.dtype().clone(),
-                actual: right.dtype().clone(),
-            });
-        }
-
-        let dtype = left.dtype().clone();
+        let dtype = if matches!(left.dtype(), Dtype::F32) || matches!(right.dtype(), Dtype::F32) {
+            Dtype::F32
+        } else {
+            left.dtype().clone()
+        };
+        let left = self.coerce_to(left, &dtype);
+        let right = self.coerce_to(right, &dtype);
         let dst = Operand::from(self.fresh_local(dtype.clone()));
         match dtype {
             Dtype::I32 => self.emit_biop(ArithBinOp::from(&op), left, right, dst.clone()),
