@@ -737,7 +737,7 @@ impl FunctionGenerator<'_> {
 
         for (op, right_expr) in rights.into_iter().rev() {
             let right = self.handle_arith_expr(right_expr)?;
-            result = self.emit_arith_biop(op, result, right)?;
+            result = self.handle_arith_biop_expr(op, result, right)?;
         }
 
         Ok(result)
@@ -858,7 +858,7 @@ impl FunctionGenerator<'_> {
         }
     }
 
-    fn emit_arith_biop(
+    fn handle_arith_biop_expr(
         &mut self,
         op: ast::ArithBiOp,
         left: Operand,
